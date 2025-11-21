@@ -115,9 +115,14 @@ app.get('/:code', async (req, res) => {
   res.redirect(link.original);
 });
 
-// Handle root route '/'
+// Serve frontend static files
+const path = require('path');
+const frontendPath = path.join(__dirname, '..', 'frontend');
+app.use(express.static(frontendPath));
+
+// Root should serve the SPA / index.html
 app.get('/', (req, res) => {
-  res.send('Welcome to the Shortlink API!');
+  res.sendFile(path.join(frontendPath, 'index.html'));
 });
 
 // Start server
