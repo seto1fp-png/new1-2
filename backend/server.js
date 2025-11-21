@@ -1,188 +1,191 @@
-// ShortLink backend - Express + better-sqlite3
+// Simple Express + better-sqlite3 URL shortener backend
 // Endpoints:
-//  POST /api/shorten { url }          -> { code, short }
-//  GET  /:code                        -> 302 redirect + record hit
-//  GET  /api/analytics/:code         -> { total, byCountry, byDevice, byBrowser }
-//  GET  /api/links                   -> latest links with hits count
+//  - POST /api/shorten  { url } -> { code, short, original }
+//  - GET  /:code        -> 302 redirect to original and record analytics
+//  - GET  /api/analytics/:code -> { code, original, total, byCountry, byDevice, byBrowser }
+//  - GET  /api/links    -> latest links with hit counts (optionally protected by ADMIN_KEY)
 
 const express = require('express');
 const bodyParser = require('body-parser');
 const Database = require('better-sqlite3');
 const crypto = require('crypto');
 const UAParser = require('ua-parser-js');
+const cors = require('cors');
 const path = require('path');
 
 const app = express();
 
-// --- Middleware ---
+// ----- Basic middleware -----
+app.use(cors());
 app.use(bodyParser.json());
 
-// --- Database setup ---
-const db = new Database('shortlink.db');
+// ----- Database setup -----
+const dbPath = process.env.DB_PATH || path.join(__dirname, 'shortlink.db');
+const db = new Database(dbPath);
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS links (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code TEXT UNIQUE NOT NULL,
-    original TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    hits INTEGER NOT NULL DEFAULT 0
-  );
-
-  CREATE TABLE IF NOT EXISTS hits (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    link_id INTEGER NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    country TEXT,
-    device TEXT,
-    browser TEXT,
-    FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE
-  );
+CREATE TABLE IF NOT EXISTS links (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT UNIQUE,
+  original TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  hits INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS hits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  link_id INTEGER NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  ip TEXT,
+  country TEXT,
+  device TEXT,
+  browser TEXT,
+  FOREIGN KEY(link_id) REFERENCES links(id)
+);
 `);
 
-// Helper: generate random short code
+// ----- Helpers -----
 function genCode(length = 6) {
-  // base64url then trim to desired length
-  return crypto.randomBytes(8).toString('base64url').slice(0, length);
-}
-
-// Helper: normalize URL (add http if missing)
-function normalizeUrl(u) {
-  if (!/^https?:\/\//i.test(u)) {
-    return 'https://' + u;
+  // Base62
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = '';
+  for (let i = 0; i < length; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
   }
-  return u;
+  return code;
 }
 
-// --- API: shorten URL ---
+function getBaseUrl(req) {
+  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL;
+  return req.protocol + '://' + req.get('host');
+}
+
+function summarizeHits(rows, field) {
+  const map = {};
+  for (const r of rows) {
+    const key = (r[field] || 'Unknown');
+    map[key] = (map[key] || 0) + 1;
+  }
+  return map;
+}
+
+// ----- API: shorten URL -----
 app.post('/api/shorten', (req, res) => {
-  let { url } = req.body || {};
-  if (!url || typeof url !== 'string') {
-    return res.status(400).json({ error: 'missing_url' });
+  const url = (req.body && req.body.url || '').trim();
+  if (!url) {
+    return res.status(400).json({ error: 'Missing url' });
   }
 
-  url = normalizeUrl(url.trim());
-
-  // generate unique code
-  let code = genCode();
-  let exists = db.prepare('SELECT id FROM links WHERE code = ?').get(code);
-  while (exists) {
-    code = genCode();
-    exists = db.prepare('SELECT id FROM links WHERE code = ?').get(code);
+  // Reuse existing link if same original
+  let row = db.prepare('SELECT * FROM links WHERE original = ? ORDER BY id DESC LIMIT 1').get(url);
+  if (!row) {
+    // generate unique code
+    let code;
+    while (true) {
+      code = genCode(6);
+      const exists = db.prepare('SELECT id FROM links WHERE code = ?').get(code);
+      if (!exists) break;
+    }
+    const info = db.prepare('INSERT INTO links (code, original) VALUES (?, ?)').run(code, url);
+    row = { id: info.lastInsertRowid, code, original: url, hits: 0 };
   }
 
-  const insert = db.prepare('INSERT INTO links (code, original) VALUES (?, ?)');
-  const info = insert.run(code, url);
-
-  const base = process.env.PUBLIC_BASE_URL || ''; // optional override
-  const short = base
-    ? base.replace(/\/+$/, '') + '/' + code
-    : '/' + code;
-
-  res.json({ code, short, id: info.lastInsertRowid });
+  const base = getBaseUrl(req);
+  const short = base + '/' + row.code;
+  return res.json({ code: row.code, short, original: row.original, hits: row.hits });
 });
 
-// --- API: latest links ---
-app.get('/api/links', (req, res) => {
-  // simple: last 50 links with hit count
-  const rows = db.prepare(`
-    SELECT 
-      l.id,
-      l.code,
-      l.original,
-      l.created_at,
-      l.hits as hits
-    FROM links l
-    ORDER BY l.created_at DESC
-    LIMIT 50
-  `).all();
-
-  res.json(rows);
-});
-
-// --- API: analytics for code ---
+// ----- API: analytics -----
 app.get('/api/analytics/:code', (req, res) => {
-  const { code } = req.params;
-  const link = db.prepare('SELECT id, code, original, hits FROM links WHERE code = ?').get(code);
+  const code = req.params.code;
+  const link = db.prepare('SELECT * FROM links WHERE code = ?').get(code);
   if (!link) {
-    return res.status(404).json({ error: 'not_found' });
+    return res.status(404).json({ error: 'Not found' });
   }
 
-  const aggCountry = db.prepare(`
-    SELECT IFNULL(country, 'Unknown') AS key, COUNT(*) AS count
-    FROM hits WHERE link_id = ?
-    GROUP BY key
-  `).all(link.id);
+  const hitRows = db.prepare('SELECT * FROM hits WHERE link_id = ?').all(link.id);
+  const total = hitRows.length;
+  const byCountry = summarizeHits(hitRows, 'country');
+  const byDevice = summarizeHits(hitRows, 'device');
+  const byBrowser = summarizeHits(hitRows, 'browser');
 
-  const aggDevice = db.prepare(`
-    SELECT IFNULL(device, 'Unknown') AS key, COUNT(*) AS count
-    FROM hits WHERE link_id = ?
-    GROUP BY key
-  `).all(link.id);
-
-  const aggBrowser = db.prepare(`
-    SELECT IFNULL(browser, 'Unknown') AS key, COUNT(*) AS count
-    FROM hits WHERE link_id = ?
-    GROUP BY key
-  `).all(link.id);
-
-  const toObj = rows =>
-    rows.reduce((acc, row) => {
-      acc[row.key] = row.count;
-      return acc;
-    }, {});
-
-  res.json({
+  return res.json({
     code: link.code,
     original: link.original,
-    total: link.hits,
-    byCountry: toObj(aggCountry),
-    byDevice: toObj(aggDevice),
-    byBrowser: toObj(aggBrowser),
+    total,
+    byCountry,
+    byDevice,
+    byBrowser
   });
 });
 
-// --- Redirect handler ---
+// ----- API: latest links (optionally protected by ADMIN_KEY) -----
+app.get('/api/links', (req, res) => {
+  const adminKey = process.env.ADMIN_KEY;
+  if (adminKey) {
+    const clientKey = req.header('x-admin-key');
+    if (!clientKey || clientKey !== adminKey) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+  }
+
+  const rows = db.prepare(
+    'SELECT id, code, original, hits, created_at FROM links ORDER BY created_at DESC LIMIT 50'
+  ).all();
+
+  const base = req.protocol + '://' + req.get('host');
+  const payload = rows.map(r => ({
+    id: r.id,
+    code: r.code,
+    original: r.original,
+    hits: r.hits,
+    created_at: r.created_at,
+    short: base + '/' + r.code
+  }));
+
+  return res.json(payload);
+});
+
+// ----- Redirect route -----
 app.get('/:code', (req, res, next) => {
   const code = req.params.code;
 
-  // ignore requests to /api/*
-  if (code === 'api') return next();
+  // ignore paths that look like assets, e.g. .css, .js, etc
+  if (code.includes('.')) return next();
 
-  const link = db.prepare('SELECT id, original FROM links WHERE code = ?').get(code);
+  const link = db.prepare('SELECT * FROM links WHERE code = ?').get(code);
   if (!link) {
-    return res.status(404).send('الرابط المختصر غير موجود');
+    return res.status(404).send('Link not found');
   }
 
-  // record hit
-  try {
-    const ua = req.headers['user-agent'] || '';
-    const parser = new UAParser(ua);
-    const deviceInfo = parser.getDevice();
-    const browserInfo = parser.getBrowser();
+  // analytics: parse UA
+  const ua = req.headers['user-agent'] || '';
+  const parser = new UAParser(ua);
+  const deviceType = parser.getDevice().type || 'desktop';
+  const browserName = parser.getBrowser().name || 'Unknown';
 
-    const device =
-      deviceInfo.type ||
-      deviceInfo.model ||
-      parser.getOS().name ||
-      'Desktop';
+  const ip =
+    (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+    req.socket.remoteAddress ||
+    null;
 
-    const browser = browserInfo.name || 'Unknown';
+  // Here we store country as "Unknown" to keep it simple;
+  // you can plug an IP geolocation service later if you like.
+  const country = 'Unknown';
 
-    const insertHit = db.prepare(
-      'INSERT INTO hits (link_id, country, device, browser) VALUES (?, ?, ?, ?)'
-    );
-    insertHit.run(link.id, 'Unknown', device, browser);
+  const tx = db.transaction(() => {
+    db.prepare(
+      'INSERT INTO hits (link_id, ip, country, device, browser) VALUES (?, ?, ?, ?, ?)'
+    ).run(link.id, ip, country, deviceType, browserName);
 
     db.prepare('UPDATE links SET hits = hits + 1 WHERE id = ?').run(link.id);
-  } catch (e) {
-    console.error('hit record error', e);
-  }
+  });
+  tx();
 
-  res.redirect(link.original);
+  return res.redirect(link.original);
 });
 
-// --- Serve frontend static files ---
+// ----- Static frontend -----
+// Serve frontend static files (index.html, styles.css, app.js)
 const frontendPath = path.join(__dirname, '..', 'frontend');
 app.use(express.static(frontendPath));
 
@@ -190,8 +193,8 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(frontendPath, 'index.html'));
 });
 
-// --- Start server ---
+// ----- Start server -----
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
-  console.log('Server running on port', PORT);
+  console.log('Shortlink backend listening on port', PORT);
 });
