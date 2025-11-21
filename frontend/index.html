@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ShortLink — اختصر واراقب الروابط</title>
+  <meta name="description" content="اختصر روابطك، تابع عدد الزيارات والمصدر، الجهاز والبلد — لوحة تحكم بسيطة وسريعة.">
+  <meta name="keywords" content="اختصار روابط, url shortener, analytics, تتبع زيارات">
+  <meta property="og:title" content="ShortLink — اختصر واراقب الروابط">
+  <meta property="og:description" content="سهل، مجاني، وتحليلات دقيقة لكل كود مختصر">
+  <meta property="og:type" content="website">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="https://your-domain.com/">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav class="nav">
+    <div class="brand">ShortLink</div>
+    <div class="links">
+      <a id="toShorten">اختصر رابط</a>
+      <a id="toAnalytics">تحليلات</a>
+      <a id="toLogin">تسجيل الدخول</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <section id="hero" class="card">
+      <h1>اختصر الروابط بسرعة وراقب الزيارات</h1>
+      <p class="muted">انسخ الرابط الأطول هنا واحصل على كود مختصر قابل للمشاركة — مع لوحة تحليلات لكل كود.</p>
+      <input id="urlInput" placeholder="https://example.com/very/long/url">
+      <div class="row">
+        <button id="shortenBtn">اختصر الآن</button>
+        <button id="copyBtn" class="secondary" title="انسخ الكود المختصر" disabled>نسخ</button>
+      </div>
+      <div id="result" class="result hidden"></div>
+    </section>
+
+    <section id="analyticsPanel" class="card hidden">
+      <h2>تحليلات كود</h2>
+      <input id="codeInput" placeholder="أدخل الكود أو الرابط المختصر"> 
+      <button id="fetchAnalytics">جلب التحليلات</button>
+      <div id="analytics" class="muted"></div>
+    </section>
+
+    <section id="loginPanel" class="card hidden">
+      <h2>لوحة الإدارة</h2>
+      <input id="adminKey" placeholder="مفتاح الإدارة">
+      <button id="adminLogin">دخول</button>
+    </section>
+
+    <section id="listPanel" class="card hidden">
+      <h2>آخر الروابط</h2>
+      <div id="linksList" class="list"></div>
+    </section>
+  </main>
+
+  <footer class="footer">© ShortLink — صمم بواسطة فريقك</footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
