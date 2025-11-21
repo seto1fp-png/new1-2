@@ -1,130 +1,197 @@
-
-// Express + better-sqlite3 backend
-// Features:
-// - POST /api/shorten { url } -> { short, code }
-// - GET /:code -> redirect to original + record analytics
-// - GET /api/analytics/:code -> aggregated stats
-// - GET /api/links -> latest public links (for frontend listing)
+// ShortLink backend - Express + better-sqlite3
+// Endpoints:
+//  POST /api/shorten { url }          -> { code, short }
+//  GET  /:code                        -> 302 redirect + record hit
+//  GET  /api/analytics/:code         -> { total, byCountry, byDevice, byBrowser }
+//  GET  /api/links                   -> latest links with hits count
 
 const express = require('express');
 const bodyParser = require('body-parser');
 const Database = require('better-sqlite3');
 const crypto = require('crypto');
-const fetch = require('node-fetch');
 const UAParser = require('ua-parser-js');
+const path = require('path');
 
 const app = express();
+
+// --- Middleware ---
 app.use(bodyParser.json());
-app.use(require('cors')());
 
-const db = new Database('./shortlink.db');
+// --- Database setup ---
+const db = new Database('shortlink.db');
 
-// init tables
 db.exec(`
-CREATE TABLE IF NOT EXISTS links (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  code TEXT UNIQUE,
-  original TEXT,
-  short TEXT,
-  created DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS hits (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  link_id INTEGER,
-  ts DATETIME DEFAULT CURRENT_TIMESTAMP,
-  ip TEXT,
-  country TEXT,
-  city TEXT,
-  ua TEXT,
-  device TEXT,
-  browser TEXT,
-  referrer TEXT,
-  FOREIGN KEY(link_id) REFERENCES links(id)
-);
+  CREATE TABLE IF NOT EXISTS links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    original TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    hits INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS hits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    link_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    country TEXT,
+    device TEXT,
+    browser TEXT,
+    FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE
+  );
 `);
 
-// Function to generate a unique code
-function genCode() { return crypto.randomBytes(3).toString('base64url'); }
+// Helper: generate random short code
+function genCode(length = 6) {
+  // base64url then trim to desired length
+  return crypto.randomBytes(8).toString('base64url').slice(0, length);
+}
 
-// API route for shortening URLs
-app.post('/api/shorten', async (req, res) => {
-  const { url } = req.body;
-  if (!url) return res.status(400).send({ error: 'no url' });
-  // create short code
+// Helper: normalize URL (add http if missing)
+function normalizeUrl(u) {
+  if (!/^https?:\/\//i.test(u)) {
+    return 'https://' + u;
+  }
+  return u;
+}
+
+// --- API: shorten URL ---
+app.post('/api/shorten', (req, res) => {
+  let { url } = req.body || {};
+  if (!url || typeof url !== 'string') {
+    return res.status(400).json({ error: 'missing_url' });
+  }
+
+  url = normalizeUrl(url.trim());
+
+  // generate unique code
   let code = genCode();
-  // ensure unique
-  let exists = db.prepare('SELECT id FROM links WHERE code=?').get(code);
+  let exists = db.prepare('SELECT id FROM links WHERE code = ?').get(code);
   while (exists) {
     code = genCode();
-    exists = db.prepare('SELECT id FROM links WHERE code=?').get(code);
+    exists = db.prepare('SELECT id FROM links WHERE code = ?').get(code);
   }
-  // use your own domain or return path /:code
-  const short = (process.env.PUBLIC_URL || '') + '/' + code;
-  const info = db.prepare('INSERT INTO links(code,original,short) VALUES(?,?,?)').run(code, url, short);
-  res.json({ code, short });
+
+  const insert = db.prepare('INSERT INTO links (code, original) VALUES (?, ?)');
+  const info = insert.run(code, url);
+
+  const base = process.env.PUBLIC_BASE_URL || ''; // optional override
+  const short = base
+    ? base.replace(/\/+$/, '') + '/' + code
+    : '/' + code;
+
+  res.json({ code, short, id: info.lastInsertRowid });
 });
 
-// API route for fetching latest links
+// --- API: latest links ---
 app.get('/api/links', (req, res) => {
-  const rows = db.prepare('SELECT code, original, short, created FROM links ORDER BY id DESC LIMIT 50').all();
-  res.json(rows.map(r => ({ code: r.code, original: r.original, short: (process.env.PUBLIC_URL || '') + '/' + r.code, created: r.created })));
+  // simple: last 50 links with hit count
+  const rows = db.prepare(`
+    SELECT 
+      l.id,
+      l.code,
+      l.original,
+      l.created_at,
+      l.hits as hits
+    FROM links l
+    ORDER BY l.created_at DESC
+    LIMIT 50
+  `).all();
+
+  res.json(rows);
 });
 
-// API route for analytics on a specific link
-app.get('/api/analytics/:code', async (req, res) => {
-  const code = req.params.code;
-  const link = db.prepare('SELECT id FROM links WHERE code=?').get(code);
-  if (!link) return res.status(404).send({ error: 'not found' });
-  const hits = db.prepare('SELECT country, device, browser, ts FROM hits WHERE link_id=?').all(link.id);
-  const total = hits.length;
-  const byCountry = {}; const byDevice = {}; const byBrowser = {};
-  hits.forEach(h => { 
-    byCountry[h.country || 'Unknown'] = (byCountry[h.country || 'Unknown'] || 0) + 1; 
-    byDevice[h.device || 'Unknown'] = (byDevice[h.device || 'Unknown'] || 0) + 1; 
-    byBrowser[h.browser || 'Unknown'] = (byBrowser[h.browser || 'Unknown'] || 0) + 1; 
+// --- API: analytics for code ---
+app.get('/api/analytics/:code', (req, res) => {
+  const { code } = req.params;
+  const link = db.prepare('SELECT id, code, original, hits FROM links WHERE code = ?').get(code);
+  if (!link) {
+    return res.status(404).json({ error: 'not_found' });
+  }
+
+  const aggCountry = db.prepare(`
+    SELECT IFNULL(country, 'Unknown') AS key, COUNT(*) AS count
+    FROM hits WHERE link_id = ?
+    GROUP BY key
+  `).all(link.id);
+
+  const aggDevice = db.prepare(`
+    SELECT IFNULL(device, 'Unknown') AS key, COUNT(*) AS count
+    FROM hits WHERE link_id = ?
+    GROUP BY key
+  `).all(link.id);
+
+  const aggBrowser = db.prepare(`
+    SELECT IFNULL(browser, 'Unknown') AS key, COUNT(*) AS count
+    FROM hits WHERE link_id = ?
+    GROUP BY key
+  `).all(link.id);
+
+  const toObj = rows =>
+    rows.reduce((acc, row) => {
+      acc[row.key] = row.count;
+      return acc;
+    }, {});
+
+  res.json({
+    code: link.code,
+    original: link.original,
+    total: link.hits,
+    byCountry: toObj(aggCountry),
+    byDevice: toObj(aggDevice),
+    byBrowser: toObj(aggBrowser),
   });
-  res.json({ total, byCountry, byDevice, byBrowser });
 });
 
-// Redirect route
-app.get('/:code', async (req, res) => {
+// --- Redirect handler ---
+app.get('/:code', (req, res, next) => {
   const code = req.params.code;
-  const link = db.prepare('SELECT id, original FROM links WHERE code=?').get(code);
-  if (!link) return res.status(404).send('Not found');
 
-  // Record hit (async non-blocking)
-  (async () => {
-    try {
-      const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
-      // Geolocation using ip-api.com (no key) - check rate limits before heavy use
-      let country = 'Unknown', city = '';
-      try {
-        const geo = await fetch('http://ip-api.com/json/' + ip + '?fields=country,city,status').then(r => r.json());
-        if (geo && geo.status === 'success') { country = geo.country; city = geo.city; }
-      } catch (e) { }
-      const ua = req.headers['user-agent'] || '';
-      const parser = new UAParser(ua);
-      const device = parser.getDevice().type || parser.getOS().name || 'Desktop';
-      const browser = parser.getBrowser().name || 'Unknown';
-      const ref = req.get('referer') || '';
-      db.prepare('INSERT INTO hits(link_id, ip, country, city, ua, device, browser, referrer) VALUES(?,?,?,?,?,?,?,?)')
-        .run(link.id, ip, country, city, ua, device, browser, ref);
-    } catch (e) { console.error('hit record error', e); }
-  })();
+  // ignore requests to /api/*
+  if (code === 'api') return next();
+
+  const link = db.prepare('SELECT id, original FROM links WHERE code = ?').get(code);
+  if (!link) {
+    return res.status(404).send('الرابط المختصر غير موجود');
+  }
+
+  // record hit
+  try {
+    const ua = req.headers['user-agent'] || '';
+    const parser = new UAParser(ua);
+    const deviceInfo = parser.getDevice();
+    const browserInfo = parser.getBrowser();
+
+    const device =
+      deviceInfo.type ||
+      deviceInfo.model ||
+      parser.getOS().name ||
+      'Desktop';
+
+    const browser = browserInfo.name || 'Unknown';
+
+    const insertHit = db.prepare(
+      'INSERT INTO hits (link_id, country, device, browser) VALUES (?, ?, ?, ?)'
+    );
+    insertHit.run(link.id, 'Unknown', device, browser);
+
+    db.prepare('UPDATE links SET hits = hits + 1 WHERE id = ?').run(link.id);
+  } catch (e) {
+    console.error('hit record error', e);
+  }
 
   res.redirect(link.original);
 });
 
-// Serve frontend static files
-const path = require('path');
+// --- Serve frontend static files ---
 const frontendPath = path.join(__dirname, '..', 'frontend');
 app.use(express.static(frontendPath));
 
-// Root should serve the SPA / index.html
 app.get('/', (req, res) => {
   res.sendFile(path.join(frontendPath, 'index.html'));
 });
 
-// Start server
+// --- Start server ---
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log('Server running on', PORT));
+app.listen(PORT, () => {
+  console.log('Server running on port', PORT);
+});
