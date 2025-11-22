@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ShortLink — اختصار روابط مع لوحة تحكم للمستخدم والادمن</title>
-  <meta name="description" content="منصة اختصار روابط عربية مع تسجيل مستخدمين، لوحة تحكم، وتحليلات للزيارات حسب الدولة والجهاز والمتصفح، مع صلاحيات ادمن لمتابعة جميع الحسابات.">
-  <meta name="keywords" content="اختصار روابط, تحليلات روابط, url shortener, dashboard, ادمن, مستخدمين">
+  <title>ShortLink — اختصار روابط مع لوحة تحكم للمستخدم والتحليلات</title>
+  <meta name="description" content="منصة اختصار روابط عربية مع تسجيل مستخدمين، لوحة تحكم، وتحليلات للزيارات حسب الدولة والجهاز والمتصفح.">
+  <meta name="keywords" content="اختصار روابط, تحليلات روابط, url shortener, dashboard, مستخدمين">
   <meta property="og:title" content="ShortLink — اختصر روابطك وتابع اداءها">
-  <meta property="og:description" content="سجل حساب، اختصر روابطك، تابع تحليلات الزيارات، وامنح الادمن تحكم كامل بجميع الحسابات.">
+  <meta property="og:description" content="سجل حساب، اختصر روابطك، تابع تحليلات الزيارات.">
   <meta property="og:type" content="website">
   <meta name="robots" content="index,follow">
   <link rel="canonical" href="https://your-domain.com/">
@@ -22,7 +22,7 @@
     "name": "ShortLink",
     "applicationCategory": "URLShortener",
     "operatingSystem": "All",
-    "description": "اختصار روابط مع تحليلات ولوحة تحكم للمستخدم والادمن.",
+    "description": "اختصار روابط مع تحليلات ولوحة تحكم للمستخدم.",
     "url": "https://your-domain.com/"
   }
   </script>
@@ -33,7 +33,7 @@
       <span class="logo-mark">SL</span>
       <div class="logo-text">
         <strong>ShortLink</strong>
-        <span>اختصر، حلّل، وادِر جميع الروابط</span>
+        <span>اختصر، حلّل، وادِر روابطك بسهولة</span>
       </div>
     </div>
 
@@ -41,7 +41,6 @@
       <button id="navShorten" class="nav-link active">الاختصار</button>
       <button id="navDashboard" class="nav-link">لوحة المستخدم</button>
       <button id="navAnalytics" class="nav-link">التحليلات</button>
-      <button id="navAdmin" class="nav-link">لوحة الادمن</button>
     </nav>
 
     <div class="auth-actions">
@@ -77,7 +76,7 @@
       </div>
     </section>
 
-    <!-- قسم إنشاء حساب وتسجيل دخول للمستخدم العادي -->
+    <!-- قسم إنشاء حساب وتسجيل دخول للمستخدم العادي + تغيير كلمة المرور -->
     <section id="authSection" class="card">
       <h2>حساب المستخدم</h2>
       <div class="tabs">
@@ -108,6 +107,25 @@
           <input id="loginPassword" type="password" class="input" placeholder="********">
         </div>
         <button type="submit" class="btn primary full">تسجيل الدخول</button>
+      </form>
+
+      <form id="changePasswordForm" class="form hidden" autocomplete="off">
+        <p class="muted small">
+          لأول مرة بعد تسجيل الدخول سيتم طلب تغيير كلمة المرور لضمان أمان حسابك.
+        </p>
+        <div class="form-row">
+          <label for="oldPassword" class="field-label">كلمة المرور الحالية</label>
+          <input id="oldPassword" type="password" class="input" placeholder="********">
+        </div>
+        <div class="form-row">
+          <label for="newPassword" class="field-label">كلمة المرور الجديدة</label>
+          <input id="newPassword" type="password" class="input" placeholder="********">
+        </div>
+        <div class="form-row">
+          <label for="newPasswordConfirm" class="field-label">تأكيد كلمة المرور الجديدة</label>
+          <input id="newPasswordConfirm" type="password" class="input" placeholder="********">
+        </div>
+        <button type="submit" class="btn primary full">حفظ كلمة المرور الجديدة</button>
       </form>
     </section>
 
@@ -143,37 +161,6 @@
 
       <div id="analytics" class="analytics-box muted small">
         لم يتم اختيار رابط بعد.
-      </div>
-    </section>
-
-    <!-- لوحة الادمن -->
-    <section id="adminSection" class="card hidden">
-      <div class="card-header">
-        <div>
-          <h2>لوحة الادمن</h2>
-          <p class="muted small">
-            الادمن يمكنه الوصول لجميع الحسابات والروابط المرتبطة بها ومتابعة عدد الزيارات لكل رابط.
-          </p>
-        </div>
-      </div>
-
-      <form id="adminLoginForm" class="form">
-        <div class="form-row">
-          <label for="adminEmail" class="field-label">بريد الادمن</label>
-          <input id="adminEmail" type="email" class="input" placeholder="admin@example.com">
-        </div>
-        <div class="form-row">
-          <label for="adminPassword" class="field-label">كلمة مرور الادمن</label>
-          <input id="adminPassword" type="password" class="input" placeholder="********">
-        </div>
-        <button type="submit" class="btn secondary full">دخول الادمن</button>
-      </form>
-
-      <div id="adminOnlyArea" class="hidden">
-        <div class="toolbar">
-          <button id="refreshAdminLinks" class="btn tiny">تحديث قائمة الروابط</button>
-        </div>
-        <div id="adminLinksList" class="list"></div>
       </div>
     </section>
   </main>

@@ -14,13 +14,11 @@ const openShortBtn    = el('openShortBtn');
 const navShorten    = el('navShorten');
 const navDashboard  = el('navDashboard');
 const navAnalytics  = el('navAnalytics');
-const navAdmin      = el('navAdmin');
 
 const shortenSection   = el('shortenSection');
 const authSection      = el('authSection');
 const dashboardSection = el('dashboardSection');
 const analyticsSection = el('analyticsSection');
-const adminSection     = el('adminSection');
 
 const tabRegister    = el('tabRegister');
 const tabLogin       = el('tabLogin');
@@ -31,6 +29,11 @@ const registerPassword = el('registerPassword');
 const loginEmail     = el('loginEmail');
 const loginPassword  = el('loginPassword');
 
+const changePasswordForm      = el('changePasswordForm');
+const oldPasswordInput        = el('oldPassword');
+const newPasswordInput        = el('newPassword');
+const newPasswordConfirmInput = el('newPasswordConfirm');
+
 const dashboardUserEmail = el('dashboardUserEmail');
 const userLinksList      = el('userLinksList');
 const userLinksEmpty     = el('userLinksEmpty');
@@ -38,13 +41,6 @@ const userLinksEmpty     = el('userLinksEmpty');
 const codeInput      = el('codeInput');
 const fetchAnalyticsBtn = el('fetchAnalytics');
 const analyticsBox   = el('analytics');
-
-const adminLoginForm = el('adminLoginForm');
-const adminEmail     = el('adminEmail');
-const adminPassword  = el('adminPassword');
-const adminOnlyArea  = el('adminOnlyArea');
-const adminLinksList = el('adminLinksList');
-const refreshAdminLinksBtn = el('refreshAdminLinks');
 
 const currentUserLabel = el('currentUserLabel');
 const logoutBtn        = el('logoutBtn');
@@ -83,8 +79,6 @@ function saveAuth(newToken, user) {
 
 function logout() {
   saveAuth(null, null);
-  adminOnlyArea.classList.add('hidden');
-  adminLinksList.innerHTML = '';
 }
 
 // دالة عامة للـ fetch تضيف التوكن تلقائياً
@@ -108,14 +102,14 @@ async function apiFetch(path, options = {}) {
 // ----- تنقل الواجهة بين الأقسام -----
 
 function setActiveNav(button) {
-  [navShorten, navDashboard, navAnalytics, navAdmin].forEach(btn => {
+  [navShorten, navDashboard, navAnalytics].forEach(btn => {
     if (!btn) return;
     btn.classList.toggle('active', btn === button);
   });
 }
 
 function showSection(section) {
-  [shortenSection, authSection, dashboardSection, analyticsSection, adminSection].forEach(sec => {
+  [shortenSection, authSection, dashboardSection, analyticsSection].forEach(sec => {
     if (!sec) return;
     sec.classList.toggle('hidden', sec !== section);
   });
@@ -130,6 +124,10 @@ function goToDashboard() {
   setActiveNav(navDashboard);
   if (!currentUser) {
     showSection(authSection);
+    showAuthForms();
+  } else if (currentUser.must_change_password) {
+    showSection(authSection);
+    showChangePasswordForm();
   } else {
     showSection(dashboardSection);
     loadUserLinks();
@@ -141,20 +139,14 @@ function goToAnalytics() {
   showSection(analyticsSection);
 }
 
-function goToAdmin() {
-  setActiveNav(navAdmin);
-  showSection(adminSection);
-}
-
 // ----- UI للمصادقة -----
 
 function updateAuthUI() {
   const isLoggedIn = !!currentUser;
-  const isAdmin = isLoggedIn && currentUser.role === 'admin';
 
   if (currentUserLabel) {
     if (isLoggedIn) {
-      currentUserLabel.textContent = currentUser.email + (isAdmin ? ' (ادمن)' : '');
+      currentUserLabel.textContent = currentUser.email;
       currentUserLabel.classList.remove('hidden');
     } else {
       currentUserLabel.textContent = '';
@@ -170,11 +162,6 @@ function updateAuthUI() {
     dashboardUserEmail.textContent = isLoggedIn ? currentUser.email : '';
     dashboardUserEmail.classList.toggle('hidden', !isLoggedIn);
   }
-
-  // لوحة الادمن
-  if (adminOnlyArea) {
-    adminOnlyArea.classList.toggle('hidden', !isAdmin);
-  }
 }
 
 // تبديل تبويب تسجيل/دخول
@@ -184,12 +171,37 @@ function activateAuthTab(tab) {
     tabLogin.classList.remove('active');
     registerForm.classList.remove('hidden');
     loginForm.classList.add('hidden');
+    if (changePasswordForm) changePasswordForm.classList.add('hidden');
   } else {
     tabRegister.classList.remove('active');
     tabLogin.classList.add('active');
     registerForm.classList.add('hidden');
     loginForm.classList.remove('hidden');
+    if (changePasswordForm) changePasswordForm.classList.add('hidden');
   }
+}
+
+function showAuthForms() {
+  if (!authSection) return;
+  if (tabRegister && tabLogin) {
+    tabRegister.classList.remove('hidden');
+    tabLogin.classList.remove('hidden');
+  }
+  if (registerForm) registerForm.classList.remove('hidden');
+  if (loginForm) loginForm.classList.add('hidden');
+  if (changePasswordForm) changePasswordForm.classList.add('hidden');
+  activateAuthTab('register');
+}
+
+function showChangePasswordForm() {
+  if (!changePasswordForm) return;
+  if (tabRegister && tabLogin) {
+    tabRegister.classList.add('hidden');
+    tabLogin.classList.add('hidden');
+  }
+  if (registerForm) registerForm.classList.add('hidden');
+  if (loginForm) loginForm.classList.add('hidden');
+  changePasswordForm.classList.remove('hidden');
 }
 
 // ----- عمليات المستخدم العادي -----
@@ -214,8 +226,13 @@ async function registerUser(e) {
       throw new Error(data.error || 'فشل إنشاء الحساب');
     }
     saveAuth(data.token, data.user);
-    alert('تم إنشاء الحساب وتسجيل الدخول بنجاح');
-    goToDashboard();
+    alert('تم إنشاء الحساب وتسجيل الدخول بنجاح. الرجاء تغيير كلمة المرور في أول دخول.');
+    if (data.user && data.user.must_change_password) {
+      showSection(authSection);
+      showChangePasswordForm();
+    } else {
+      goToDashboard();
+    }
   } catch (err) {
     console.error(err);
     alert(err.message || 'حدث خطأ أثناء إنشاء الحساب');
@@ -242,95 +259,55 @@ async function loginUser(e) {
       throw new Error(data.error || 'فشل تسجيل الدخول');
     }
     saveAuth(data.token, data.user);
-    alert('تم تسجيل الدخول بنجاح');
-    goToDashboard();
+    if (data.user && data.user.must_change_password) {
+      alert('هذه أول مرة تسجل الدخول، يجب تغيير كلمة المرور الآن.');
+      showSection(authSection);
+      showChangePasswordForm();
+    } else {
+      alert('تم تسجيل الدخول بنجاح');
+      goToDashboard();
+    }
   } catch (err) {
     console.error(err);
     alert(err.message || 'حدث خطأ أثناء تسجيل الدخول');
   }
 }
 
-// ----- عمليات الادمن -----
-
-async function adminLogin(e) {
+async function changePassword(e) {
   e.preventDefault();
-  const email = (adminEmail.value || '').trim();
-  const password = (adminPassword.value || '').trim();
+  const oldPass = (oldPasswordInput.value || '').trim();
+  const newPass = (newPasswordInput.value || '').trim();
+  const confirm = (newPasswordConfirmInput.value || '').trim();
 
-  if (!email || !password) {
-    alert('ادخل بريد وكلمة مرور الادمن');
+  if (!oldPass || !newPass || !confirm) {
+    alert('الرجاء تعبئة جميع الحقول');
+    return;
+  }
+  if (newPass !== confirm) {
+    alert('تأكيد كلمة المرور غير مطابق');
+    return;
+  }
+  if (newPass.length < 6) {
+    alert('يفضل أن تكون كلمة المرور 6 أحرف على الأقل');
     return;
   }
 
   try {
-    const resp = await apiFetch('/api/auth/admin/login', {
+    const resp = await apiFetch('/api/auth/change-password', {
       method: 'POST',
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({ oldPassword: oldPass, newPassword: newPass })
     });
     const data = await resp.json();
     if (!resp.ok) {
-      throw new Error(data.error || 'فشل تسجيل دخول الادمن');
+      throw new Error(data.error || 'فشل تغيير كلمة المرور');
     }
     saveAuth(data.token, data.user);
-    alert('تم تسجيل دخول الادمن بنجاح');
-    loadAdminLinks();
+    alert('تم تغيير كلمة المرور بنجاح');
+    goToDashboard();
   } catch (err) {
     console.error(err);
-    alert(err.message || 'حدث خطأ أثناء تسجيل دخول الادمن');
+    alert(err.message || 'حدث خطأ أثناء تغيير كلمة المرور');
   }
-}
-
-async function loadAdminLinks() {
-  try {
-    const resp = await apiFetch('/api/admin/links', { method: 'GET' });
-    const data = await resp.json();
-    if (!resp.ok) {
-      throw new Error(data.error || 'فشل جلب بيانات الادمن');
-    }
-    renderAdminLinks(data.links || []);
-  } catch (err) {
-    console.error(err);
-    adminLinksList.innerHTML = '<div class="muted small">تعذر جلب البيانات.</div>';
-  }
-}
-
-function renderAdminLinks(links) {
-  if (!adminLinksList) return;
-  if (!links.length) {
-    adminLinksList.innerHTML = '<div class="muted small">لا توجد روابط حتى الآن.</div>';
-    return;
-  }
-
-  adminLinksList.innerHTML = links.map((item) => {
-    const shortUrl = (item.code ? window.location.origin + '/' + item.code : '');
-    const created = item.created_at ? new Date(item.created_at).toLocaleString('ar-SA') : '';
-    const email = item.user_email || 'زائر';
-    return `
-      <div class="list-item">
-        <div class="item-main">
-          <div><strong>${email}</strong></div>
-          <div>الأصلي: <code dir="ltr">${item.original}</code></div>
-          <div>المختصر: <code dir="ltr">${shortUrl}</code></div>
-          <div class="muted small">${created}</div>
-        </div>
-        <div class="item-meta">
-          <span>زيارات: <strong>${item.hits || 0}</strong></span>
-          ${item.code ? `<button class="btn tiny" data-code="${item.code}">تحليلات</button>` : ''}
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  adminLinksList.querySelectorAll('button[data-code]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const c = btn.getAttribute('data-code');
-      if (c) {
-        codeInput.value = c;
-        goToAnalytics();
-        fetchAnalytics();
-      }
-    });
-  });
 }
 
 // ----- اختصار الروابط وتخزين الروابط المنسوخة -----
@@ -475,7 +452,7 @@ function parseCodeFromInput(input) {
   if (!raw.includes('/')) return raw;
   try {
     const url = new URL(raw);
-    let path = url.pathname.replace(/^\\//, '');
+    let path = url.pathname.replace(/^\//, '');
     if (path.includes('/')) {
       path = path.split('/').filter(Boolean).pop();
     }
@@ -553,19 +530,13 @@ document.addEventListener('DOMContentLoaded', () => {
   if (navShorten) navShorten.addEventListener('click', goToShorten);
   if (navDashboard) navDashboard.addEventListener('click', goToDashboard);
   if (navAnalytics) navAnalytics.addEventListener('click', goToAnalytics);
-  if (navAdmin) navAdmin.addEventListener('click', () => {
-    goToAdmin();
-    if (currentUser && currentUser.role === 'admin') {
-      loadAdminLinks();
-    }
-  });
 
   if (tabRegister) tabRegister.addEventListener('click', () => activateAuthTab('register'));
   if (tabLogin) tabLogin.addEventListener('click', () => activateAuthTab('login'));
 
   if (registerForm) registerForm.addEventListener('submit', registerUser);
   if (loginForm) loginForm.addEventListener('submit', loginUser);
-  if (adminLoginForm) adminLoginForm.addEventListener('submit', adminLogin);
+  if (changePasswordForm) changePasswordForm.addEventListener('submit', changePassword);
 
   if (shortenBtn) shortenBtn.addEventListener('click', shorten);
   if (copyBtn) copyBtn.addEventListener('click', copyShort);
@@ -587,11 +558,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (logoutBtn) logoutBtn.addEventListener('click', () => {
     logout();
     goToShorten();
+    showAuthForms();
   });
-
-  if (refreshAdminLinksBtn) {
-    refreshAdminLinksBtn.addEventListener('click', loadAdminLinks);
-  }
 
   if (urlInput) {
     urlInput.addEventListener('keydown', (e) => {
@@ -600,5 +568,13 @@ document.addEventListener('DOMContentLoaded', () => {
         shorten();
       }
     });
+  }
+
+  // إذا كان المستخدم مسجل الدخول مسبقًا وتحتاج كلمة مرور جديدة
+  if (currentUser && currentUser.must_change_password) {
+    showSection(authSection);
+    showChangePasswordForm();
+  } else {
+    goToShorten();
   }
 });

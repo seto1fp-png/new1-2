@@ -1,8 +1,14 @@
 // ShortLink backend with user auth (user + admin), URL shortening, and analytics
+// Updates in this version:
+// - حذف واجهة الادمن من الفرونت اند (لكن الادمن موجود في الباك اند للتحكم العام إذا احتجت).
+/// - إضافة حقل must_change_password لإجبار المستخدم على تغيير كلمة المرور بعد أول تسجيل دخول.
+// - إنشاء مستخدم ادمن افتراضي واحد بإيميل وكلمة مرور ثابتة يمكن تغييرها من المتغيرات البيئية.
+//
 // Endpoints:
 //   POST   /api/auth/register        { email, password } -> { token, user }
 //   POST   /api/auth/login           { email, password } -> { token, user }
 //   POST   /api/auth/admin/login     { email, password } -> { token, user (role=admin) }
+//   POST   /api/auth/change-password { oldPassword, newPassword } -> { token, user }
 //   GET    /api/me                   -> { user }
 //   POST   /api/shorten              { url } -> { code, short, original }
 //   GET    /api/links                -> { links: [...] }      (links for current user)
@@ -10,10 +16,11 @@
 //   GET    /api/analytics/:code      -> { code, original, total, byCountry, byDevice, byBrowser }
 //   GET    /:code                    -> 302 redirect and record analytics
 //
-// Notes:
-//   - Users stored in SQLite, passwords hashed with PBKDF2.
-//   - Admin user can be bootstrapped via env: ADMIN_EMAIL / ADMIN_PASSWORD.
-//   - Token is simple HMAC-based signed payload (not full JWT) using TOKEN_SECRET.
+// Admin default credentials (if you did not set env vars):
+//   email:    admin@shortlink.local
+//   password: Admin123!
+//
+// You can override them with environment variables ADMIN_EMAIL and ADMIN_PASSWORD.
 
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -39,6 +46,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user',
+  must_change_password INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -63,6 +71,19 @@ CREATE TABLE IF NOT EXISTS analytics (
   FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE
 );
 `);
+
+// Migration: ensure must_change_password column exists for older DBs
+try {
+  const info = db.prepare("PRAGMA table_info(users)").all();
+  const hasCol = info.some(col => col.name === "must_change_password");
+  if (!hasCol) {
+    db.prepare("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 1").run();
+    // اجعل الحسابات القديمة لا تحتاج تغيير كلمة المرور إلا إذا عدلتها يدويًا
+    db.prepare("UPDATE users SET must_change_password = 0 WHERE must_change_password IS NULL OR must_change_password = ''").run();
+  }
+} catch (err) {
+  console.error("Error running users table migration:", err);
+}
 
 // ----- Helper: password hashing -----
 function hashPassword(password) {
@@ -155,26 +176,23 @@ function adminRequired(req, res, next) {
 
 app.use(authOptional);
 
-// ----- Bootstrap admin user (if env vars provided) -----
+// ----- Bootstrap admin user -----
 function ensureAdminUser() {
-  const adminEmail = process.env.ADMIN_EMAIL;
-  const adminPassword = process.env.ADMIN_PASSWORD;
-  if (!adminEmail || !adminPassword) {
-    console.log('[ShortLink] No ADMIN_EMAIL/ADMIN_PASSWORD env set. You can create an admin manually using /api/auth/register then promote in DB.');
-    return;
-  }
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@shortlink.local';
+  const adminPassword = process.env.ADMIN_PASSWORD || 'Admin123!';
+
   const getUser = db.prepare('SELECT id, email, role FROM users WHERE email = ?');
   const existing = getUser.get(adminEmail);
   if (existing) {
     if (existing.role !== 'admin') {
-      db.prepare('UPDATE users SET role = ? WHERE id = ?').run('admin', existing.id);
+      db.prepare('UPDATE users SET role = ?, must_change_password = 1 WHERE id = ?').run('admin', existing.id);
       console.log('[ShortLink] Existing user promoted to admin:', adminEmail);
     }
     return;
   }
-  const insert = db.prepare('INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)');
+  const insert = db.prepare('INSERT INTO users (email, password_hash, role, must_change_password) VALUES (?, ?, ?, ?)');
   const hash = hashPassword(adminPassword);
-  const info = insert.run(adminEmail, hash, 'admin');
+  const info = insert.run(adminEmail, hash, 'admin', 1);
   console.log('[ShortLink] Admin user created:', adminEmail, '(id=' + info.lastInsertRowid + ')');
 }
 
@@ -194,10 +212,10 @@ app.post('/api/auth/register', (req, res) => {
   }
 
   const hash = hashPassword(password);
-  const insert = db.prepare('INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)');
-  const info = insert.run(email, hash, 'user');
+  const insert = db.prepare('INSERT INTO users (email, password_hash, role, must_change_password) VALUES (?, ?, ?, ?)');
+  const info = insert.run(email, hash, 'user', 1); // أول تسجيل دخول يطلب تغيير كلمة المرور
 
-  const user = { id: info.lastInsertRowid, email, role: 'user' };
+  const user = { id: info.lastInsertRowid, email, role: 'user', must_change_password: 1 };
   const token = createToken(user);
 
   res.json({ token, user });
@@ -210,13 +228,13 @@ app.post('/api/auth/login', (req, res) => {
   }
 
   const row = db
-    .prepare('SELECT id, email, password_hash, role FROM users WHERE email = ?')
+    .prepare('SELECT id, email, password_hash, role, must_change_password FROM users WHERE email = ?')
     .get(email);
   if (!row || !verifyPassword(password, row.password_hash)) {
     return res.status(401).json({ error: 'invalid_credentials' });
   }
 
-  const user = { id: row.id, email: row.email, role: row.role };
+  const user = { id: row.id, email: row.email, role: row.role, must_change_password: row.must_change_password ? 1 : 0 };
   const token = createToken(user);
   res.json({ token, user });
 });
@@ -228,7 +246,7 @@ app.post('/api/auth/admin/login', (req, res) => {
   }
 
   const row = db
-    .prepare('SELECT id, email, password_hash, role FROM users WHERE email = ?')
+    .prepare('SELECT id, email, password_hash, role, must_change_password FROM users WHERE email = ?')
     .get(email);
   if (!row || row.role !== 'admin') {
     return res.status(401).json({ error: 'not_admin' });
@@ -237,13 +255,44 @@ app.post('/api/auth/admin/login', (req, res) => {
     return res.status(401).json({ error: 'invalid_credentials' });
   }
 
-  const user = { id: row.id, email: row.email, role: row.role };
+  const user = { id: row.id, email: row.email, role: row.role, must_change_password: row.must_change_password ? 1 : 0 };
   const token = createToken(user);
   res.json({ token, user });
 });
 
+app.post('/api/auth/change-password', authRequired, (req, res) => {
+  const { oldPassword, newPassword } = req.body || {};
+  if (!oldPassword || !newPassword) {
+    return res.status(400).json({ error: 'old_and_new_required' });
+  }
+
+  const row = db
+    .prepare('SELECT id, email, password_hash, role, must_change_password FROM users WHERE id = ?')
+    .get(req.user.id);
+  if (!row) {
+    return res.status(404).json({ error: 'user_not_found' });
+  }
+  if (!verifyPassword(oldPassword, row.password_hash)) {
+    return res.status(401).json({ error: 'invalid_old_password' });
+  }
+
+  const hash = hashPassword(newPassword);
+  db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hash, row.id);
+
+  const updatedUser = { id: row.id, email: row.email, role: row.role, must_change_password: 0 };
+  const token = createToken(updatedUser);
+  res.json({ token, user: updatedUser });
+});
+
 app.get('/api/me', authRequired, (req, res) => {
-  res.json({ user: req.user });
+  const row = db
+    .prepare('SELECT id, email, role, must_change_password FROM users WHERE id = ?')
+    .get(req.user.id);
+  if (!row) {
+    return res.status(404).json({ error: 'user_not_found' });
+  }
+  const user = { id: row.id, email: row.email, role: row.role, must_change_password: row.must_change_password ? 1 : 0 };
+  res.json({ user });
 });
 
 // ----- Helper: generate short code -----
