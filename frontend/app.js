@@ -1,266 +1,604 @@
 const API = ''; // إذا كان الـ backend على دومين مختلف، ضع رابطه هنا مثل: https://short.example.com
 
-function el(id) { return document.getElementById(id); }
-
-// عناصر الواجهة
-const urlInput       = el('urlInput');
-const shortenBtn     = el('shortenBtn');
-const copyBtn        = el('copyBtn');
-const resultBox      = el('result');
-const linksList      = el('linksList');
-const codeInput      = el('codeInput');
-const analyticsBox   = el('analytics');
-const adminKeyInput  = el('adminKey');
-
-// أقسام الواجهة
-const heroSection      = el('hero');
-const analyticsPanel   = el('analyticsPanel');
-const loginPanel       = el('loginPanel');
-const listPanel        = el('listPanel');
-
-// روابط التنقل
-const toShorten    = el('toShorten');
-const toAnalytics  = el('toAnalytics');
-const toLogin      = el('toLogin');
-
-// حالة بسيطة لمفتاح الإدارة (على المتصفح فقط)
-const ADMIN_KEY_STORAGE = 'shortlink_admin_key';
-
-// ====== وظائف واجهة ======
-
-function showSection(target) {
-  const sections = [heroSection, analyticsPanel, loginPanel, listPanel];
-  sections.forEach(sec => sec.classList.add('hidden'));
-  target.classList.remove('hidden');
+function el(id) {
+  return document.getElementById(id);
 }
 
-function setResult(text, shortUrl) {
-  if (!text && !shortUrl) {
-    resultBox.classList.add('hidden');
+const urlInput        = el('urlInput');
+const shortenBtn      = el('shortenBtn');
+const copyBtn         = el('copyBtn');
+const resultBox       = el('result');
+const shortUrlDisplay = el('shortUrlDisplay');
+const openShortBtn    = el('openShortBtn');
+
+const navShorten    = el('navShorten');
+const navDashboard  = el('navDashboard');
+const navAnalytics  = el('navAnalytics');
+const navAdmin      = el('navAdmin');
+
+const shortenSection   = el('shortenSection');
+const authSection      = el('authSection');
+const dashboardSection = el('dashboardSection');
+const analyticsSection = el('analyticsSection');
+const adminSection     = el('adminSection');
+
+const tabRegister    = el('tabRegister');
+const tabLogin       = el('tabLogin');
+const registerForm   = el('registerForm');
+const loginForm      = el('loginForm');
+const registerEmail  = el('registerEmail');
+const registerPassword = el('registerPassword');
+const loginEmail     = el('loginEmail');
+const loginPassword  = el('loginPassword');
+
+const dashboardUserEmail = el('dashboardUserEmail');
+const userLinksList      = el('userLinksList');
+const userLinksEmpty     = el('userLinksEmpty');
+
+const codeInput      = el('codeInput');
+const fetchAnalyticsBtn = el('fetchAnalytics');
+const analyticsBox   = el('analytics');
+
+const adminLoginForm = el('adminLoginForm');
+const adminEmail     = el('adminEmail');
+const adminPassword  = el('adminPassword');
+const adminOnlyArea  = el('adminOnlyArea');
+const adminLinksList = el('adminLinksList');
+const refreshAdminLinksBtn = el('refreshAdminLinks');
+
+const currentUserLabel = el('currentUserLabel');
+const logoutBtn        = el('logoutBtn');
+
+const yearSpan = el('year');
+
+// مفاتيح التخزين المحلي
+const TOKEN_KEY = 'shortlink_token';
+const USER_KEY  = 'shortlink_user';
+const COPIED_KEY = 'shortlink_copied_links';
+
+let token = localStorage.getItem(TOKEN_KEY) || null;
+let currentUser = null;
+
+try {
+  const storedUser = localStorage.getItem(USER_KEY);
+  if (storedUser) {
+    currentUser = JSON.parse(storedUser);
+  }
+} catch (_) {
+  currentUser = null;
+}
+
+function saveAuth(newToken, user) {
+  token = newToken;
+  currentUser = user;
+  if (token && user) {
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  }
+  updateAuthUI();
+}
+
+function logout() {
+  saveAuth(null, null);
+  adminOnlyArea.classList.add('hidden');
+  adminLinksList.innerHTML = '';
+}
+
+// دالة عامة للـ fetch تضيف التوكن تلقائياً
+async function apiFetch(path, options = {}) {
+  const opts = Object.assign({ headers: {} }, options);
+  if (!opts.headers['Content-Type'] && !(opts.body instanceof FormData)) {
+    opts.headers['Content-Type'] = 'application/json';
+  }
+  if (token) {
+    opts.headers['Authorization'] = 'Bearer ' + token;
+  }
+  const resp = await fetch((API || '') + path, opts);
+  if (resp.status === 401) {
+    // صلاحية منتهية أو غير مصرح
+    console.warn('Unauthorized, logging out');
+    logout();
+  }
+  return resp;
+}
+
+// ----- تنقل الواجهة بين الأقسام -----
+
+function setActiveNav(button) {
+  [navShorten, navDashboard, navAnalytics, navAdmin].forEach(btn => {
+    if (!btn) return;
+    btn.classList.toggle('active', btn === button);
+  });
+}
+
+function showSection(section) {
+  [shortenSection, authSection, dashboardSection, analyticsSection, adminSection].forEach(sec => {
+    if (!sec) return;
+    sec.classList.toggle('hidden', sec !== section);
+  });
+}
+
+function goToShorten() {
+  setActiveNav(navShorten);
+  showSection(shortenSection);
+}
+
+function goToDashboard() {
+  setActiveNav(navDashboard);
+  if (!currentUser) {
+    showSection(authSection);
+  } else {
+    showSection(dashboardSection);
+    loadUserLinks();
+  }
+}
+
+function goToAnalytics() {
+  setActiveNav(navAnalytics);
+  showSection(analyticsSection);
+}
+
+function goToAdmin() {
+  setActiveNav(navAdmin);
+  showSection(adminSection);
+}
+
+// ----- UI للمصادقة -----
+
+function updateAuthUI() {
+  const isLoggedIn = !!currentUser;
+  const isAdmin = isLoggedIn && currentUser.role === 'admin';
+
+  if (currentUserLabel) {
+    if (isLoggedIn) {
+      currentUserLabel.textContent = currentUser.email + (isAdmin ? ' (ادمن)' : '');
+      currentUserLabel.classList.remove('hidden');
+    } else {
+      currentUserLabel.textContent = '';
+      currentUserLabel.classList.add('hidden');
+    }
+  }
+
+  if (logoutBtn) {
+    logoutBtn.classList.toggle('hidden', !isLoggedIn);
+  }
+
+  if (dashboardUserEmail) {
+    dashboardUserEmail.textContent = isLoggedIn ? currentUser.email : '';
+    dashboardUserEmail.classList.toggle('hidden', !isLoggedIn);
+  }
+
+  // لوحة الادمن
+  if (adminOnlyArea) {
+    adminOnlyArea.classList.toggle('hidden', !isAdmin);
+  }
+}
+
+// تبديل تبويب تسجيل/دخول
+function activateAuthTab(tab) {
+  if (tab === 'register') {
+    tabRegister.classList.add('active');
+    tabLogin.classList.remove('active');
+    registerForm.classList.remove('hidden');
+    loginForm.classList.add('hidden');
+  } else {
+    tabRegister.classList.remove('active');
+    tabLogin.classList.add('active');
+    registerForm.classList.add('hidden');
+    loginForm.classList.remove('hidden');
+  }
+}
+
+// ----- عمليات المستخدم العادي -----
+
+async function registerUser(e) {
+  e.preventDefault();
+  const email = (registerEmail.value || '').trim();
+  const password = (registerPassword.value || '').trim();
+
+  if (!email || !password) {
+    alert('الرجاء إدخال البريد وكلمة المرور');
     return;
   }
-  resultBox.classList.remove('hidden');
-  resultBox.innerHTML = `
-    <div class="result-title">تم إنشاء الرابط المختصر ✅</div>
-    <div class="result-url">${shortUrl ? `<a href="${shortUrl}" target="_blank">${shortUrl}</a>` : text}</div>
-  `;
+
+  try {
+    const resp = await apiFetch('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data.error || 'فشل إنشاء الحساب');
+    }
+    saveAuth(data.token, data.user);
+    alert('تم إنشاء الحساب وتسجيل الدخول بنجاح');
+    goToDashboard();
+  } catch (err) {
+    console.error(err);
+    alert(err.message || 'حدث خطأ أثناء إنشاء الحساب');
+  }
 }
 
-// ====== استدعاءات API ======
+async function loginUser(e) {
+  e.preventDefault();
+  const email = (loginEmail.value || '').trim();
+  const password = (loginPassword.value || '').trim();
+
+  if (!email || !password) {
+    alert('الرجاء إدخال البريد وكلمة المرور');
+    return;
+  }
+
+  try {
+    const resp = await apiFetch('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data.error || 'فشل تسجيل الدخول');
+    }
+    saveAuth(data.token, data.user);
+    alert('تم تسجيل الدخول بنجاح');
+    goToDashboard();
+  } catch (err) {
+    console.error(err);
+    alert(err.message || 'حدث خطأ أثناء تسجيل الدخول');
+  }
+}
+
+// ----- عمليات الادمن -----
+
+async function adminLogin(e) {
+  e.preventDefault();
+  const email = (adminEmail.value || '').trim();
+  const password = (adminPassword.value || '').trim();
+
+  if (!email || !password) {
+    alert('ادخل بريد وكلمة مرور الادمن');
+    return;
+  }
+
+  try {
+    const resp = await apiFetch('/api/auth/admin/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data.error || 'فشل تسجيل دخول الادمن');
+    }
+    saveAuth(data.token, data.user);
+    alert('تم تسجيل دخول الادمن بنجاح');
+    loadAdminLinks();
+  } catch (err) {
+    console.error(err);
+    alert(err.message || 'حدث خطأ أثناء تسجيل دخول الادمن');
+  }
+}
+
+async function loadAdminLinks() {
+  try {
+    const resp = await apiFetch('/api/admin/links', { method: 'GET' });
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data.error || 'فشل جلب بيانات الادمن');
+    }
+    renderAdminLinks(data.links || []);
+  } catch (err) {
+    console.error(err);
+    adminLinksList.innerHTML = '<div class="muted small">تعذر جلب البيانات.</div>';
+  }
+}
+
+function renderAdminLinks(links) {
+  if (!adminLinksList) return;
+  if (!links.length) {
+    adminLinksList.innerHTML = '<div class="muted small">لا توجد روابط حتى الآن.</div>';
+    return;
+  }
+
+  adminLinksList.innerHTML = links.map((item) => {
+    const shortUrl = (item.code ? window.location.origin + '/' + item.code : '');
+    const created = item.created_at ? new Date(item.created_at).toLocaleString('ar-SA') : '';
+    const email = item.user_email || 'زائر';
+    return `
+      <div class="list-item">
+        <div class="item-main">
+          <div><strong>${email}</strong></div>
+          <div>الأصلي: <code dir="ltr">${item.original}</code></div>
+          <div>المختصر: <code dir="ltr">${shortUrl}</code></div>
+          <div class="muted small">${created}</div>
+        </div>
+        <div class="item-meta">
+          <span>زيارات: <strong>${item.hits || 0}</strong></span>
+          ${item.code ? `<button class="btn tiny" data-code="${item.code}">تحليلات</button>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  adminLinksList.querySelectorAll('button[data-code]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const c = btn.getAttribute('data-code');
+      if (c) {
+        codeInput.value = c;
+        goToAnalytics();
+        fetchAnalytics();
+      }
+    });
+  });
+}
+
+// ----- اختصار الروابط وتخزين الروابط المنسوخة -----
+
+function saveCopiedLink(info) {
+  let arr = [];
+  try {
+    const raw = localStorage.getItem(COPIED_KEY);
+    if (raw) arr = JSON.parse(raw);
+  } catch (_) {}
+  arr.unshift({
+    code: info.code,
+    short: info.short,
+    original: info.original,
+    copiedAt: new Date().toISOString()
+  });
+  arr = arr.slice(0, 50);
+  localStorage.setItem(COPIED_KEY, JSON.stringify(arr));
+}
 
 async function shorten() {
   const url = (urlInput.value || '').trim();
-  if (!url) return alert('أدخل رابط صالح');
+  if (!url) {
+    alert('أدخل رابط صالح');
+    return;
+  }
 
   shortenBtn.disabled = true;
   shortenBtn.textContent = 'جاري الاختصار...';
 
   try {
-    const resp = await fetch((API || '') + '/api/shorten', {
+    const resp = await apiFetch('/api/shorten', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url })
     });
-
+    const data = await resp.json();
     if (!resp.ok) {
-      throw new Error('HTTP ' + resp.status);
+      throw new Error(data.error || 'فشل اختصار الرابط');
     }
 
-    const data = await resp.json();
-    // نفترض أن الـ backend يرجع: { short, code }
-    const base = window.location.origin;
-    const shortUrl = data.short || (base + '/' + data.code);
+    const shortUrl = data.short || (window.location.origin + '/' + data.code);
+    shortUrlDisplay.textContent = shortUrl;
+    resultBox.classList.remove('hidden');
+    copyBtn.disabled = false;
 
-    setResult('', shortUrl);
-    copyBtn.dataset.value = shortUrl;
-    copyBtn.classList.remove('hidden');
+    try {
+      await navigator.clipboard.writeText(shortUrl);
+      saveCopiedLink({ code: data.code, short: shortUrl, original: data.original });
+    } catch (_) {
+      // تجاهل خطأ النسخ
+    }
 
-    // حدث قائمة آخر الروابط
-    loadLinks();
-  } catch (e) {
-    console.error(e);
-    alert('فشل إنشاء الرابط المختصر');
+    loadUserLinks(); // في حال المستخدم مسجل دخول
+  } catch (err) {
+    console.error(err);
+    alert(err.message || 'حدث خطأ أثناء الاختصار');
   } finally {
     shortenBtn.disabled = false;
-    shortenBtn.textContent = 'اختصار';
+    shortenBtn.textContent = 'اختصار الرابط';
   }
 }
 
-async function loadLinks() {
+async function copyShort() {
+  const txt = shortUrlDisplay.textContent || '';
+  if (!txt) return;
   try {
-    const headers = {};
-    const savedKey = localStorage.getItem(ADMIN_KEY_STORAGE);
-    if (savedKey) headers['x-admin-key'] = savedKey;
-
-    const resp = await fetch((API || '') + '/api/links', { headers });
-    if (!resp.ok) return;
-
-    const data = await resp.json();
-    renderLinks(data || []);
-  } catch (e) {
-    console.warn('links load error', e);
+    await navigator.clipboard.writeText(txt);
+    alert('تم نسخ الرابط المختصر');
+  } catch (_) {
+    alert('تعذر نسخ الرابط تلقائياً، انسخه يدوياً.');
   }
 }
 
-function renderLinks(items) {
-  if (!Array.isArray(items) || !items.length) {
-    linksList.innerHTML = '<div class="muted empty">لا توجد روابط بعد.</div>';
+// ----- جلب الروابط الخاصة بالمستخدم -----
+
+async function loadUserLinks() {
+  if (!currentUser) {
+    userLinksList.innerHTML = '';
+    userLinksEmpty.classList.remove('hidden');
     return;
   }
 
-  const base = window.location.origin;
-  linksList.innerHTML = items
-    .map(item => {
-      const code = item.code || '';
-      const shortUrl = item.short || (base + '/' + code);
-      return `
-        <div class="item">
-          <div class="item-main">
-            <a href="${shortUrl}" target="_blank" class="item-short">${shortUrl}</a>
-            <div class="item-original" title="${item.original || ''}">
-              ${item.original || ''}
-            </div>
-          </div>
-          <div class="item-meta">
-            <span>زيارات: <strong>${item.hits || 0}</strong></span>
-            ${code ? `<button class="tiny" data-analytics-code="${code}">تحليلات</button>` : ''}
-          </div>
-        </div>
-      `;
-    })
-    .join('');
-
-  // ربط أزرار التحليلات في القائمة
-  linksList.querySelectorAll('[data-analytics-code]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const c = btn.getAttribute('data-analytics-code');
-      codeInput.value = c;
-      showSection(analyticsPanel);
-      fetchAnalytics();
-    });
-  });
-}
-
-async function fetchAnalytics() {
-  let code = (codeInput.value || '').trim();
-  if (!code) return alert('أدخل الكود أو الرابط المختصر');
-
-  // السماح بلصق الرابط نفسه واستخراج الكود
   try {
-    const url = new URL(code);
-    const path = url.pathname.replace(/^\//, '');
-    if (path) code = path;
-  } catch (_) {
-    // ليست URL، نعتبرها كود فقط
-  }
-
-  analyticsBox.innerHTML = '<div class="muted">جاري جلب البيانات...</div>';
-
-  try {
-    const resp = await fetch((API || '') + '/api/analytics/' + encodeURIComponent(code));
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const resp = await apiFetch('/api/links', { method: 'GET' });
     const data = await resp.json();
-    analyticsBox.innerHTML = formatAnalytics(data);
-  } catch (e) {
-    console.error(e);
-    analyticsBox.innerHTML = '<div class="error">فشل جلب التحليلات لهذا الكود.</div>';
+    if (!resp.ok) {
+      throw new Error(data.error || 'فشل جلب الروابط');
+    }
+    const links = data.links || [];
+    renderUserLinks(links);
+  } catch (err) {
+    console.error(err);
+    userLinksList.innerHTML = '<div class="muted small">تعذر جلب الروابط.</div>';
+    userLinksEmpty.classList.add('hidden');
   }
 }
 
-function formatAnalytics(d) {
-  if (!d || !d.total) {
-    return '<div class="muted">لا توجد بيانات لهذا الكود حتى الآن.</div>';
+function renderUserLinks(links) {
+  if (!links.length) {
+    userLinksList.innerHTML = '';
+    userLinksEmpty.classList.remove('hidden');
+    return;
   }
 
-  const block = (title, obj) => {
-    const entries = Object.entries(obj || {});
-    if (!entries.length) return '';
+  userLinksEmpty.classList.add('hidden');
+
+  userLinksList.innerHTML = links.map((item) => {
+    const shortUrl = (item.code ? window.location.origin + '/' + item.code : '');
+    const created = item.created_at ? new Date(item.created_at).toLocaleString('ar-SA') : '';
     return `
-      <div class="analytics-block">
-        <div class="analytics-title">${title}</div>
-        <div class="analytics-tags">
-          ${entries
-            .map(([k, v]) => `<span class="tag">${k} <span class="tag-count">${v}</span></span>`)
-            .join('')}
+      <div class="list-item">
+        <div class="item-main">
+          <div>الأصلي: <code dir="ltr">${item.original}</code></div>
+          <div>المختصر: <code dir="ltr">${shortUrl}</code></div>
+          <div class="muted small">${created}</div>
+        </div>
+        <div class="item-meta">
+          <span>زيارات: <strong>${item.hits || 0}</strong></span>
+          ${item.code ? `<button class="btn tiny" data-code="${item.code}">تحليلات</button>` : ''}
         </div>
       </div>
     `;
-  };
+  }).join('');
 
-  return `
-    <div class="analytics-summary">
-      <div class="analytics-number">${d.total}</div>
-      <div class="analytics-label">إجمالي الزيارات</div>
-    </div>
-    ${block('الدول', d.byCountry)}
-    ${block('الأجهزة', d.byDevice)}
-    ${block('المتصفحات', d.byBrowser)}
-  `;
+  userLinksList.querySelectorAll('button[data-code]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const c = btn.getAttribute('data-code');
+      if (c) {
+        codeInput.value = c;
+        goToAnalytics();
+        fetchAnalytics();
+      }
+    });
+  });
 }
 
-// ====== تسجيل دخول بسيط (على المتصفح فقط) ======
+// ----- التحليلات -----
 
-function initAdminFromStorage() {
-  const savedKey = localStorage.getItem(ADMIN_KEY_STORAGE);
-  if (savedKey) {
-    adminKeyInput.value = savedKey;
-    loginPanel.classList.add('logged');
+function parseCodeFromInput(input) {
+  const raw = (input || '').trim();
+  if (!raw) return '';
+  if (!raw.includes('/')) return raw;
+  try {
+    const url = new URL(raw);
+    let path = url.pathname.replace(/^\\//, '');
+    if (path.includes('/')) {
+      path = path.split('/').filter(Boolean).pop();
+    }
+    return path;
+  } catch (_) {
+    return raw;
   }
 }
 
-function adminLogin() {
-  const key = (adminKeyInput.value || '').trim();
-  if (!key) {
-    alert('أدخل مفتاح الإدارة');
+async function fetchAnalytics() {
+  const raw = codeInput.value;
+  const code = parseCodeFromInput(raw);
+  if (!code) {
+    alert('أدخل كود أو رابط مختصر');
     return;
   }
-  localStorage.setItem(ADMIN_KEY_STORAGE, key);
-  loginPanel.classList.add('logged');
-  alert('تم حفظ مفتاح الإدارة على هذا المتصفح فقط');
-  loadLinks();
-}
 
-// ====== نسخ الرابط المختصر ======
+  analyticsBox.innerHTML = '<div class="muted small">جاري جلب البيانات...</div>';
 
-async function copyShort() {
-  const value = copyBtn.dataset.value;
-  if (!value) return;
   try {
-    await navigator.clipboard.writeText(value);
-    copyBtn.textContent = 'تم النسخ ✔';
-    setTimeout(() => (copyBtn.textContent = 'نسخ الرابط'), 1200);
-  } catch (e) {
-    console.warn(e);
-    alert('تعذر النسخ، انسخ الرابط يدويًا.');
+    const resp = await apiFetch('/api/analytics/' + encodeURIComponent(code), { method: 'GET' });
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data.error || 'تعذر جلب التحليلات');
+    }
+
+    const total = data.total || 0;
+    const byCountry = data.byCountry || [];
+    const byDevice = data.byDevice || [];
+    const byBrowser = data.byBrowser || [];
+
+    const totalHtml = `<div><strong>إجمالي الزيارات:</strong> ${total}</div>`;
+
+    function renderChips(arr) {
+      if (!arr.length) return '<span class="muted small">لا توجد بيانات بعد.</span>';
+      return '<div class="analytics-chip-row">' + arr.map(item => {
+        const label = item.label || item.country || item.device || item.browser || 'غير معروف';
+        const count = item.count || 0;
+        return `<span class="analytics-chip">${label} — ${count}</span>`;
+      }).join('') + '</div>';
+    }
+
+    analyticsBox.innerHTML = `
+      ${totalHtml}
+      <div class="analytics-grid">
+        <div class="analytics-card">
+          <h3>الدول</h3>
+          ${renderChips(byCountry)}
+        </div>
+        <div class="analytics-card">
+          <h3>الأجهزة</h3>
+          ${renderChips(byDevice)}
+        </div>
+        <div class="analytics-card">
+          <h3>المتصفحات</h3>
+          ${renderChips(byBrowser)}
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    console.error(err);
+    analyticsBox.innerHTML = '<div class="muted small">تعذر جلب التحليلات.</div>';
   }
 }
 
-// ====== ربط الأحداث عند تحميل الصفحة ======
+// ----- تهيئة عامة -----
 
 document.addEventListener('DOMContentLoaded', () => {
-  // تنقّل بين الأقسام
-  if (toShorten) {
-    toShorten.addEventListener('click', () => showSection(heroSection));
-  }
-  if (toAnalytics) {
-    toAnalytics.addEventListener('click', () => showSection(analyticsPanel));
-  }
-  if (toLogin) {
-    toLogin.addEventListener('click', () => showSection(loginPanel));
+  if (yearSpan) {
+    yearSpan.textContent = new Date().getFullYear();
   }
 
-  // أزرار أساسية
-  shortenBtn && shortenBtn.addEventListener('click', shorten);
-  copyBtn && copyBtn.addEventListener('click', copyShort);
-  el('fetchAnalytics') && el('fetchAnalytics').addEventListener('click', fetchAnalytics);
-  el('adminLogin') && el('adminLogin').addEventListener('click', adminLogin);
+  updateAuthUI();
 
-  // إدخال Enter في حقل الرابط
-  urlInput && urlInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') shorten();
+  if (navShorten) navShorten.addEventListener('click', goToShorten);
+  if (navDashboard) navDashboard.addEventListener('click', goToDashboard);
+  if (navAnalytics) navAnalytics.addEventListener('click', goToAnalytics);
+  if (navAdmin) navAdmin.addEventListener('click', () => {
+    goToAdmin();
+    if (currentUser && currentUser.role === 'admin') {
+      loadAdminLinks();
+    }
   });
 
-  // تهيئة الإدارة و تحميل الروابط
-  initAdminFromStorage();
-  loadLinks();
+  if (tabRegister) tabRegister.addEventListener('click', () => activateAuthTab('register'));
+  if (tabLogin) tabLogin.addEventListener('click', () => activateAuthTab('login'));
+
+  if (registerForm) registerForm.addEventListener('submit', registerUser);
+  if (loginForm) loginForm.addEventListener('submit', loginUser);
+  if (adminLoginForm) adminLoginForm.addEventListener('submit', adminLogin);
+
+  if (shortenBtn) shortenBtn.addEventListener('click', shorten);
+  if (copyBtn) copyBtn.addEventListener('click', copyShort);
+  if (openShortBtn) openShortBtn.addEventListener('click', () => {
+    const u = shortUrlDisplay.textContent;
+    if (u) window.open(u, '_blank');
+  });
+
+  if (fetchAnalyticsBtn) fetchAnalyticsBtn.addEventListener('click', fetchAnalytics);
+  if (codeInput) {
+    codeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        fetchAnalytics();
+      }
+    });
+  }
+
+  if (logoutBtn) logoutBtn.addEventListener('click', () => {
+    logout();
+    goToShorten();
+  });
+
+  if (refreshAdminLinksBtn) {
+    refreshAdminLinksBtn.addEventListener('click', loadAdminLinks);
+  }
+
+  if (urlInput) {
+    urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        shorten();
+      }
+    });
+  }
 });
