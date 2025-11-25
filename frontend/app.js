@@ -1,4 +1,4 @@
-const API = ''; // إذا كان الـ backend على دومين مختلف، ضع رابطه هنا مثل: https://short.example.com
+const API = 'https://bysd.online'; // إذا كان الـ backend على دومين مختلف، ضع رابطه هنا مثل: https://short.example.com
 
 function el(id) {
   return document.getElementById(id);
