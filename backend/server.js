@@ -473,7 +473,7 @@ app.get('/', (_req, res) => {
 });
 
 // ----- Start server -----
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log('[ShortLink] Backend listening on port', PORT);
 });
