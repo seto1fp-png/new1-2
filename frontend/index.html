@@ -3,171 +3,59 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ShortLink — اختصار روابط مع لوحة تحكم للمستخدم والتحليلات</title>
-  <meta name="description" content="منصة اختصار روابط عربية مع تسجيل مستخدمين، لوحة تحكم، وتحليلات للزيارات حسب الدولة والجهاز والمتصفح.">
-  <meta name="keywords" content="اختصار روابط, تحليلات روابط, url shortener, dashboard, مستخدمين">
-  <meta property="og:title" content="ShortLink — اختصر روابطك وتابع اداءها">
-  <meta property="og:description" content="سجل حساب، اختصر روابطك، تابع تحليلات الزيارات.">
+  <title>ShortLink — اختصر واراقب الروابط</title>
+  <meta name="description" content="اختصر روابطك، تابع عدد الزيارات والمصدر، الجهاز والبلد — لوحة تحكم بسيطة وسريعة.">
+  <meta name="keywords" content="اختصار روابط, url shortener, analytics, تتبع زيارات">
+  <meta property="og:title" content="ShortLink — اختصر واراقب الروابط">
+  <meta property="og:description" content="سهل، مجاني، وتحليلات دقيقة لكل كود مختصر">
   <meta property="og:type" content="website">
   <meta name="robots" content="index,follow">
   <link rel="canonical" href="https://your-domain.com/">
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="styles.css">
-
-  <!-- Structured data لتحسين الـ SEO -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "WebApplication",
-    "name": "ShortLink",
-    "applicationCategory": "URLShortener",
-    "operatingSystem": "All",
-    "description": "اختصار روابط مع تحليلات ولوحة تحكم للمستخدم.",
-    "url": "https://your-domain.com/"
-  }
-  </script>
 </head>
 <body>
-  <header class="header">
-    <div class="logo">
-      <span class="logo-mark">SL</span>
-      <div class="logo-text">
-        <strong>ShortLink</strong>
-        <span>اختصر، حلّل، وادِر روابطك بسهولة</span>
-      </div>
+  <nav class="nav">
+    <div class="brand">ShortLink</div>
+    <div class="links">
+      <a id="toShorten">اختصر رابط</a>
+      <a id="toAnalytics">تحليلات</a>
+      <a id="toLogin">تسجيل الدخول</a>
     </div>
+  </nav>
 
-    <nav class="nav">
-      <button id="navShorten" class="nav-link active">الاختصار</button>
-      <button id="navDashboard" class="nav-link">لوحة المستخدم</button>
-      <button id="navAnalytics" class="nav-link">التحليلات</button>
-    </nav>
-
-    <div class="auth-actions">
-      <span id="currentUserLabel" class="current-user hidden"></span>
-      <button id="logoutBtn" class="btn ghost hidden">تسجيل خروج</button>
-    </div>
-  </header>
-
-  <main class="main">
-    <!-- قسم الاختصار الأساسي -->
-    <section id="shortenSection" class="card">
-      <h1 class="hero-title">اختصر روابطك في ثواني</h1>
-      <p class="hero-subtitle">
-        الصق رابطك، اضغط اختصار، واحصل على رابط قصير جاهز للنسخ مع حفظه في حسابك ولوحة التحكم.
-      </p>
-
-      <div class="form-row">
-        <label for="urlInput" class="field-label">الرابط الأصلي</label>
-        <input id="urlInput" type="url" class="input" placeholder="https://example.com/your-long-url" dir="ltr">
+  <main class="container">
+    <section id="hero" class="card">
+      <h1>اختصر الروابط بسرعة وراقب الزيارات</h1>
+      <p class="muted">انسخ الرابط الأطول هنا واحصل على كود مختصر قابل للمشاركة — مع لوحة تحليلات لكل كود.</p>
+      <input id="urlInput" placeholder="https://example.com/very/long/url">
+      <div class="row">
+        <button id="shortenBtn">اختصر الآن</button>
+        <button id="copyBtn" class="secondary" title="انسخ الكود المختصر" disabled>نسخ</button>
       </div>
-
-      <div class="actions-row">
-        <button id="shortenBtn" class="btn primary">اختصار الرابط</button>
-        <button id="copyBtn" class="btn secondary" disabled>نسخ الرابط المختصر</button>
-      </div>
-
-      <div id="result" class="result hidden">
-        <div class="result-title">رابطك المختصر</div>
-        <div class="result-body">
-          <code id="shortUrlDisplay" class="short-url" dir="ltr"></code>
-          <button id="openShortBtn" class="btn tiny">فتح</button>
-        </div>
-      </div>
+      <div id="result" class="result hidden"></div>
     </section>
 
-    <!-- قسم إنشاء حساب وتسجيل دخول للمستخدم العادي + تغيير كلمة المرور -->
-    <section id="authSection" class="card">
-      <h2>حساب المستخدم</h2>
-      <div class="tabs">
-        <button id="tabRegister" class="tab active">إنشاء حساب</button>
-        <button id="tabLogin" class="tab">تسجيل دخول</button>
-      </div>
-
-      <form id="registerForm" class="form" autocomplete="off">
-        <div class="form-row">
-          <label for="registerEmail" class="field-label">البريد الإلكتروني</label>
-          <input id="registerEmail" type="email" class="input" placeholder="you@example.com">
-        </div>
-        <div class="form-row">
-          <label for="registerPassword" class="field-label">كلمة المرور</label>
-          <input id="registerPassword" type="password" class="input" placeholder="********">
-        </div>
-        <button type="submit" class="btn primary full">إنشاء حساب جديد</button>
-        <p class="muted small">سيتم ربط الروابط المختصرة بهذا الحساب لعرضها في لوحة التحكم.</p>
-      </form>
-
-      <form id="loginForm" class="form hidden" autocomplete="off">
-        <div class="form-row">
-          <label for="loginEmail" class="field-label">البريد الإلكتروني</label>
-          <input id="loginEmail" type="email" class="input" placeholder="you@example.com">
-        </div>
-        <div class="form-row">
-          <label for="loginPassword" class="field-label">كلمة المرور</label>
-          <input id="loginPassword" type="password" class="input" placeholder="********">
-        </div>
-        <button type="submit" class="btn primary full">تسجيل الدخول</button>
-      </form>
-
-      <form id="changePasswordForm" class="form hidden" autocomplete="off">
-        <p class="muted small">
-          لأول مرة بعد تسجيل الدخول سيتم طلب تغيير كلمة المرور لضمان أمان حسابك.
-        </p>
-        <div class="form-row">
-          <label for="oldPassword" class="field-label">كلمة المرور الحالية</label>
-          <input id="oldPassword" type="password" class="input" placeholder="********">
-        </div>
-        <div class="form-row">
-          <label for="newPassword" class="field-label">كلمة المرور الجديدة</label>
-          <input id="newPassword" type="password" class="input" placeholder="********">
-        </div>
-        <div class="form-row">
-          <label for="newPasswordConfirm" class="field-label">تأكيد كلمة المرور الجديدة</label>
-          <input id="newPasswordConfirm" type="password" class="input" placeholder="********">
-        </div>
-        <button type="submit" class="btn primary full">حفظ كلمة المرور الجديدة</button>
-      </form>
+    <section id="analyticsPanel" class="card hidden">
+      <h2>تحليلات كود</h2>
+      <input id="codeInput" placeholder="أدخل الكود أو الرابط المختصر"> 
+      <button id="fetchAnalytics">جلب التحليلات</button>
+      <div id="analytics" class="muted"></div>
     </section>
 
-    <!-- لوحة تحكم المستخدم -->
-    <section id="dashboardSection" class="card hidden">
-      <div class="card-header">
-        <div>
-          <h2>لوحة تحكم المستخدم</h2>
-          <p class="muted small">
-            هنا تظهر جميع الروابط المختصرة المرتبطة بحسابك مع عدد الزيارات و زر فتح التحليلات لكل رابط.
-          </p>
-        </div>
-        <div class="pill" id="dashboardUserEmail"></div>
-      </div>
-
-      <div id="userLinksEmpty" class="muted small">
-        لا توجد روابط بعد. قم باختصار رابط جديد وسيتم حفظه هنا تلقائيًا.
-      </div>
-
-      <div id="userLinksList" class="list"></div>
+    <section id="loginPanel" class="card hidden">
+      <h2>لوحة الإدارة</h2>
+      <input id="adminKey" placeholder="مفتاح الإدارة">
+      <button id="adminLogin">دخول</button>
     </section>
 
-    <!-- قسم التحليلات -->
-    <section id="analyticsSection" class="card hidden">
-      <h2>تحليلات رابط</h2>
-      <p class="muted small">ادخل كود الرابط المختصر أو الصق الرابط نفسه لعرض التحليلات.</p>
-
-      <div class="form-row">
-        <label for="codeInput" class="field-label">كود / رابط مختصر</label>
-        <input id="codeInput" class="input" placeholder="مثال: abc123 أو https://your-domain.com/abc123" dir="ltr">
-      </div>
-      <button id="fetchAnalytics" class="btn primary">عرض التحليلات</button>
-
-      <div id="analytics" class="analytics-box muted small">
-        لم يتم اختيار رابط بعد.
-      </div>
+    <section id="listPanel" class="card hidden">
+      <h2>آخر الروابط</h2>
+      <div id="linksList" class="list"></div>
     </section>
   </main>
 
-  <footer class="footer">
-    © <span id="year"></span> ShortLink — منصة عربية لاختصار الروابط والتحليلات.
-  </footer>
+  <footer class="footer">© ShortLink — صمم بواسطة فريقك</footer>
 
   <script src="app.js"></script>
 </body>
